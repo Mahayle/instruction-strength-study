@@ -2,7 +2,7 @@
 
 I started with a simple question:
 
-**When a language model is given conflicting instructions, does the strength of the first instruction affect which behaviour wins?**
+**When a language model is given conflicting instructions, does the strength of the standing instruction affect which behaviour wins?**
 
 So I built an experiment to test it.
 
@@ -42,18 +42,18 @@ The main run was interrupted by API quota exhaustion after **38 observations had
 
 The resulting analysis is **preliminary and descriptive**. It does not confirm or reject the study's hypothesis.
 
-The 37 scorable observations show a descriptive pattern in which the weak baseline averaged **0.000**, the explicit baseline **1.733**, and the very_explicit baseline **1.800**. This is most consistent with the protocol's pre-specified threshold pattern, but the interrupted and uneven dataset is too limited for a definitive conclusion.
+Among the 37 scorable observations, the weak baseline averaged **0.000**, the explicit baseline **1.733**, and the very_explicit baseline **1.800**. This is closest to the protocol's pre-specified threshold pattern, but the interrupted and uneven dataset is too limited for a definitive conclusion.
 
 The scoring pass was also conducted as a single, non-blinded preliminary pass rather than the protocol's intended scoring procedure. That limitation, including the possibility of expectancy bias, is documented in the analysis.
 
 ## Research artifacts
 
-- [Protocol](protocol-v1.0.md) — the locked experimental methodology.
-- [Experiment script](experiment/steering_experiment.py) — the code used to run the experiment.
-- [Raw results](results/main_run_results.csv) — the 38 persisted observations.
-- [Scored observations](analysis/scored_observations.csv) — the derived scoring dataset.
-- [Preliminary report](analysis/preliminary_report.md) — the detailed interim analysis and methodological assessment.
-- [Research capability summary](analysis/research_capability_summary.md) — a concise overview of the project and what the work demonstrates.
+- [`Protocol`](protocol-v1.0.md) — the locked experimental methodology.
+- [`Experiment script`](experiment/steering_experiment.py) — the code used to run the experiment.
+- [`Raw results`](results/main_run_results.csv) — the 38 persisted observations.
+- [`Scored observations`](analysis/scored_observations.csv) — the derived scoring dataset.
+- [`Preliminary report`](analysis/preliminary_report.md) — the detailed interim analysis and methodological assessment.
+- [`Research capability summary`](analysis/research_capability_summary.md) — a concise overview of the project and what the work demonstrates.
 
 ## What the experiment asks
 
