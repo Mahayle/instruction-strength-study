@@ -18,7 +18,12 @@ import requests
 
 MODEL = "openai/gpt-oss-20b:free"
 TEMPERATURE = 0.7
-MAX_TOKENS = 600
+# Section 22(E) technical correction: the pre-main-run API inspection showed
+# finish_reason == "length" at max_tokens=600 (reasoning + content together
+# exceeded the cap before a user-facing answer completed). Raised per the
+# Section 10 pre-committed contingency. Not a change to experimental
+# conditions, prompts, scoring, or design.
+MAX_TOKENS = 1600
 
 RUNS_PER_CONDITION = 3
 RETRY_ATTEMPTS = 3
@@ -77,8 +82,32 @@ TEST_PROMPTS = [
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = PROJECT_ROOT / "results"
-RESULTS_FILE = RESULTS_DIR / "results.csv"
+# Deliberately distinct from results.csv, which Section 20 identifies as a
+# retained duplicate of pilot data excluded from the main analysis dataset.
+RESULTS_FILE = RESULTS_DIR / "main_run_results.csv"
 INSPECTION_FILE = RESULTS_DIR / "api_inspection.csv"
+
+# Section 11 data-capture fields (minimum set), written one row per completed trial.
+RESULTS_FIELDS = [
+    "baseline_strength",
+    "steering_strength",
+    "test_prompt",
+    "run",
+    "trial_sequence",
+    "model",
+    "timestamp",
+    "model_output",
+    "finish_reason",
+    "reversion_score_0to2",
+]
+
+
+class QuotaExhaustedError(RuntimeError):
+    """Raised when the API signals rate-limit or quota exhaustion (HTTP 429).
+
+    Per Section 10, this is not retried; it must stop the run cleanly and
+    immediately while preserving all rows already written to disk.
+    """
 
 def build_trials():
     """Build the 135 trials and shuffle their execution order."""
@@ -168,36 +197,31 @@ def call_model(trial, api_key):
                 json=payload,
                 timeout=120,
             )
-
-            if response.status_code == 429:
-                raise RuntimeError(
-                    "HTTP 429 rate limit or quota exhaustion detected."
-                )
-
-            if response.status_code == 504:
-                if attempt < RETRY_ATTEMPTS:
-                    time.sleep(RETRY_BACKOFF_SECONDS)
-                    continue
-
-                raise RuntimeError(
-                    "HTTP 504 after the maximum number of attempts."
-                )
-
-            response.raise_for_status()
-
-            return response.json()
-
-        except RuntimeError:
-            raise
-
         except requests.RequestException as error:
+            # Not an HTTP 504 response, so per Section 10 this is not retried.
+            raise RuntimeError(f"API request failed: {error}")
+
+        if response.status_code == 429:
+            raise QuotaExhaustedError(
+                "HTTP 429 rate limit or quota exhaustion detected."
+            )
+
+        if response.status_code == 504:
             if attempt < RETRY_ATTEMPTS:
                 time.sleep(RETRY_BACKOFF_SECONDS)
                 continue
 
             raise RuntimeError(
-                f"API request failed: {error}"
+                "HTTP 504 after the maximum number of attempts."
             )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            # Any HTTP error other than 429/504 is not retried per Section 10.
+            raise RuntimeError(f"API request failed: {error}")
+
+        return response.json()
 
     raise RuntimeError("API request failed.")
 
@@ -281,6 +305,88 @@ def inspect_api(api_key):
     print(f"Finish reason: {result['finish_reason']}")
 
     return result
+
+def load_completed_trial_sequences():
+    """Return the trial_sequence values already saved in RESULTS_FILE, if any."""
+
+    if not RESULTS_FILE.exists():
+        return set()
+
+    with RESULTS_FILE.open("r", newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        return {int(row["trial_sequence"]) for row in reader}
+
+def run_experiment(trials, api_key):
+    """
+    Run all trials, writing each completed row to disk immediately (Section 22.B)
+    and stopping cleanly, preserving all completed rows, on rate-limit/quota
+    exhaustion (Section 22.C).
+
+    Trials whose trial_sequence is already present in RESULTS_FILE are skipped,
+    so restarting after an interruption or quota exhaustion does not duplicate
+    already-completed trials.
+    """
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    completed_trial_sequences = load_completed_trial_sequences()
+    file_already_exists = RESULTS_FILE.exists()
+
+    remaining_trials = [
+        trial
+        for trial in trials
+        if trial["trial_sequence"] not in completed_trial_sequences
+    ]
+
+    already_done = len(trials) - len(remaining_trials)
+
+    if already_done:
+        print(f"Skipping {already_done} already-completed trial(s) from a previous run.")
+
+    with RESULTS_FILE.open("a", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+
+        if not file_already_exists:
+            writer.writerow(RESULTS_FIELDS)
+
+        completed = 0
+
+        for trial in remaining_trials:
+            try:
+                data = call_model(trial, api_key)
+            except QuotaExhaustedError as error:
+                print(f"Stopping run: {error}")
+                print(f"{completed}/{len(remaining_trials)} trials completed and saved.")
+                break
+            except RuntimeError as error:
+                print(f"Stopping run after unrecoverable API error: {error}")
+                print(f"{completed}/{len(remaining_trials)} trials completed and saved.")
+                break
+
+            result = extract_response(data)
+
+            writer.writerow(
+                [
+                    trial["baseline_strength"],
+                    trial["steering_strength"],
+                    trial["test_prompt"],
+                    trial["run"],
+                    trial["trial_sequence"],
+                    MODEL,
+                    datetime.now(timezone.utc).isoformat(),
+                    result["content"],
+                    result["finish_reason"],
+                    "",
+                ]
+            )
+            file.flush()
+
+            completed += 1
+
+        else:
+            print(f"{completed}/{len(remaining_trials)} trials completed and saved.")
+
+    return completed
 
 # The main run is deliberately not started automatically yet.
 
